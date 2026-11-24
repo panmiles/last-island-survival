@@ -14,6 +14,48 @@ function sync(map,arr,create){const seen=new Set();for(const o of arr){if(o.hp!=
 function syncScene(){sync(objectGroups.players,players,character);sync(objectGroups.resources,resources,resourceMesh);sync(objectGroups.buildings,buildings,buildingMesh);sync(objectGroups.mobs,mobs,mobMesh)}
 $('join').onclick=()=>socket.emit('join',{name:$('name').value,room:$('room').value,avatar});socket.on('connect_error',()=>{$('error').textContent='เชื่อมต่อเซิร์ฟเวอร์ไม่ได้'});socket.on('joined',d=>{id=d.id;world=d.world;$('login').style.display='none';$('hud').style.display='block'});socket.on('state',s=>{players=s.players;resources=s.resources;buildings=s.buildings||[];mobs=s.mobs||[];const p=players.find(v=>v.id===id);if(!p)return;latest=p;$('hp').value=p.hp;$('hpText').textContent=Math.ceil(p.hp);$('hunger').value=p.hunger;$('energy').value=p.energy;$('death').style.display=p.dead?'grid':'none';$('inventory').innerHTML=`🪵 ${p.wood}　🪨 ${p.stone}　🍓 ${p.berry}　🍖 ${p.meat}<br>${p.axe?'<button id="equip">🪓 '+(p.equipped==='axe'?'เก็บขวาน':'ถือขวาน')+'</button>':'คราฟต์ขวานเพื่อถืออาวุธ'}　${p.armor?'🛡️ สวมเกราะ':''}　👥 ${players.length}`});
 function notice(t){const d=document.createElement('div');d.textContent=t;$('messages').appendChild(d);while($('messages').children.length>4)$('messages').firstChild.remove()}socket.on('notice',notice);socket.on('chat',m=>notice(m.name+': '+m.text));$('inventory').onclick=e=>{if(e.target.id==='equip')socket.emit('equip','axe')};for(const [btn,event,data]of [['gather','gather'],['eat','eat'],['axe','craft','axe'],['armor','craft','armor'],['fire','craft','fire'],['respawn','respawn']])$(btn).onclick=()=>socket.emit(event,data);$('run').onclick=()=>{runToggle=!runToggle;$('run').classList.toggle('active',runToggle)};$('buildToggle').onclick=()=>{$('buildPanel').style.display=$('buildPanel').style.display==='block'?'none':'block'};function cancelBuild(){selectedBuild=null;$('buildPanel').style.display='none'}$('cancelBuild').onclick=cancelBuild;document.querySelectorAll('[data-build]').forEach(b=>b.onclick=()=>{selectedBuild=b.dataset.build;$('buildPanel').style.display='none';notice('แตะพื้นใกล้ตัวเพื่อสร้าง')});
-const raycaster=new THREE.Raycaster(),pointer=new THREE.Vector2(),groundPlane=new THREE.Plane(new THREE.Vector3(0,1,0),0);renderer.domElement.addEventListener('pointerup',e=>{if(!selectedBuild||!id)return;pointer.set(e.clientX/innerWidth*2-1,-e.clientY/innerHeight*2+1);raycaster.setFromCamera(pointer,camera);const pt=new THREE.Vector3();if(raycaster.ray.intersectPlane(groundPlane,pt)){socket.emit('build',{type:selectedBuild,x:pt.x+world/2,y:pt.z+world/2});cancelBuild()}});$('msg').addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.value.trim()){socket.emit('chat',e.target.value);e.target.value='';e.target.blur()}});const stick=$('stick'),knob=$('knob');function setStick(e){const r=stick.getBoundingClientRect(),x=e.clientX-(r.left+r.width/2),y=e.clientY-(r.top+r.height/2),len=Math.hypot(x,y)||1;joy={x:x/Math.max(len,38),y:y/Math.max(len,38)};knob.style.transform=`translate(${joy.x*30}px,${joy.y*30}px)`}stick.onpointerdown=e=>{stick.setPointerCapture(e.pointerId);setStick(e)};stick.onpointermove=e=>{if(stick.hasPointerCapture(e.pointerId))setStick(e)};stick.onpointerup=stick.onpointercancel=()=>{joy={x:0,y:0};knob.style.transform=''};addEventListener('keydown',e=>{if(e.target.tagName==='INPUT')return;keys[e.key.toLowerCase()]=true;if(e.key===' ')socket.emit('gather')});addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);setInterval(()=>{if(!id)return;const dx=joy.x+(keys.d||keys.arrowright?1:0)-(keys.a||keys.arrowleft?1:0),dy=joy.y+(keys.s||keys.arrowdown?1:0)-(keys.w||keys.arrowup?1:0);socket.emit('move',{dx,dy,run:runToggle||keys.shift})},33);
+const raycaster=new THREE.Raycaster(),pointer=new THREE.Vector2(),groundPlane=new THREE.Plane(new THREE.Vector3(0,1,0),0);renderer.domElement.addEventListener('pointerup',e=>{if(!selectedBuild||!id)return;pointer.set(e.clientX/innerWidth*2-1,-e.clientY/innerHeight*2+1);raycaster.setFromCamera(pointer,camera);const pt=new THREE.Vector3();if(raycaster.ray.intersectPlane(groundPlane,pt)){socket.emit('build',{type:selectedBuild,x:pt.x+world/2,y:pt.z+world/2});cancelBuild()}});$('msg').addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.value.trim()){socket.emit('chat',e.target.value);e.target.value='';e.target.blur()}});// Mobile joystick: capture one pointer, ignore other fingers, and release safely.
+const stick=$('stick'),knob=$('knob');
+let stickPointer=null;
+function resetStick(){stickPointer=null;joy={x:0,y:0};knob.style.transform='translate(0px,0px)'}
+function setStick(e){
+  const r=stick.getBoundingClientRect();
+  const x=e.clientX-r.left-r.width/2,y=e.clientY-r.top-r.height/2;
+  const radius=Math.max(18,Math.min(r.width,r.height)*.34);
+  const length=Math.hypot(x,y),scale=length>radius?radius/length:1;
+  joy={x:x*scale/radius,y:y*scale/radius};
+  knob.style.transform=`translate(${x*scale}px,${y*scale}px)`;
+}
+stick.style.touchAction='none';
+stick.addEventListener('pointerdown',e=>{
+  if(stickPointer!==null)return;
+  e.preventDefault();stickPointer=e.pointerId;
+  stick.setPointerCapture(e.pointerId);setStick(e);
+});
+stick.addEventListener('pointermove',e=>{
+  if(e.pointerId!==stickPointer)return;
+  e.preventDefault();setStick(e);
+});
+for(const type of ['pointerup','pointercancel','lostpointercapture']){
+  stick.addEventListener(type,e=>{if(e.pointerId===stickPointer)resetStick()});
+}
+addEventListener('blur',()=>{resetStick();keys={}});
+addEventListener('visibilitychange',()=>{if(document.hidden){resetStick();keys={}}});
+addEventListener('keydown',e=>{
+  if(e.target instanceof HTMLElement && ['INPUT','TEXTAREA'].includes(e.target.tagName))return;
+  const k=e.key.toLowerCase();keys[k]=true;
+  if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(k))e.preventDefault();
+  if(k===' '&&!e.repeat)socket.emit('gather');
+});
+addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false});
+// Send a normalized movement vector; movement is independent of device FPS.
+setInterval(()=>{
+  if(!id||!socket.connected)return;
+  let dx=joy.x+(keys.d||keys.arrowright?1:0)-(keys.a||keys.arrowleft?1:0);
+  let dy=joy.y+(keys.s||keys.arrowdown?1:0)-(keys.w||keys.arrowup?1:0);
+  const length=Math.hypot(dx,dy);
+  if(length>1){dx/=length;dy/=length}
+  socket.emit('move',{dx,dy,run:runToggle||Boolean(keys.shift)});
+},33);
 function draw(){requestAnimationFrame(draw);syncScene();const p=players.find(v=>v.id===id);if(p){const target=new THREE.Vector3(p.x-world/2,0,p.y-world/2);camera.position.lerp(new THREE.Vector3(target.x+85,155,target.z+195),.11);camera.lookAt(target.x,18,target.z)}renderer.render(scene,camera)}draw();function resize(){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)}addEventListener('resize',resize);
 </script></body></html>
