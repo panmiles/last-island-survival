@@ -3,6 +3,7 @@ const express=require('express'),http=require('http'),{Server}=require('socket.i
 const app=express(),server=http.createServer(app),io=new Server(server,{maxHttpBufferSize:10000});
 app.get('/health',(_req,res)=>res.status(200).json({status:'ok',game:'LAST ISLAND',version:'2.0'}));
 app.use(express.static('public'));
+const AVATARS=['explorer','shadow','rescuer','mystic','farmer','guardian'];
 const WORLD=1800,rooms=new Map(),players=new Map(),TICK=100;
 const rand=(a,b)=>Math.random()*(b-a)+a,clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const costs={wall:{wood:5,stone:0},floor:{wood:3,stone:0},door:{wood:7,stone:1},hut:{wood:18,stone:8},spikes:{wood:5,stone:3}};
@@ -17,7 +18,8 @@ function spend(p,c){if(Object.keys(c).some(k=>(p[k]||0)<c[k]))return false;for(c
 function blockAt(r,x,y){return r.buildings.some(b=>Math.abs(b.x-x)<37&&Math.abs(b.y-y)<37);}
 function damageMob(r,m,p){m.hp=Math.max(0,m.hp-(p.axe?30:12));if(m.hp===0){m.respawnAt=Date.now()+15000;p.meat+=types[m.type].loot.meat;io.to(r.name).emit('notice',p.name+' defeated a '+m.type+'!');}}
 io.on('connection',socket=>{let p=null,lastMove=0,lastAction=0;
- socket.on('join',d=>{if(p)return;const room=clean(d?.room,20).replace(/[^a-zA-Z0-9_-]/g,'')||'island';const r=roomFor(room);p={id:socket.id,name:clean(d?.name,18)||'Survivor',room,x:rand(820,980),y:rand(820,980),hp:100,hunger:100,energy:100,wood:0,stone:0,berry:0,meat:0,axe:false,campfire:0,dead:false};players.set(p.id,p);socket.join(room);socket.emit('joined',{id:p.id,world:WORLD,costs});socket.emit('state',snapshot(r));io.to(room).emit('notice',p.name+' joined');});
+ socket.on('join',d=>{if(p)return;const room=clean(d?.room,20).replace(/[^a-zA-Z0-9_-]/g,'')||'island';const r=roomFor(room);p={id:socket.id,name:clean(d?.name,18)||'Survivor',avatar:AVATARS.includes(d?.avatar)?d.avatar:'explorer',room,x:rand(820,980),y:rand(820,980),hp:100,hunger:100,energy:100,wood:0,stone:0,berry:0,meat:0,axe:false,campfire:0,dead:false};players.set(p.id,p);socket.join(room);socket.emit('joined',{id:p.id,world:WORLD,costs});socket.emit('state',snapshot(r));io.to(room).emit('notice',p.name+' joined');});
+ socket.on('avatar',avatar=>{if(!p)return;if(AVATARS.includes(avatar)){p.avatar=avatar;note(socket,'เปลี่ยนตัวละครแล้ว');}});
  socket.on('move',d=>{if(!p||p.dead)return;const now=Date.now();if(now-lastMove<25)return;const dt=clamp((now-(lastMove||now-33))/33,0,1.5);lastMove=now;let dx=Number(d?.dx),dy=Number(d?.dy);if(!Number.isFinite(dx)||!Number.isFinite(dy))return;const mag=Math.hypot(dx,dy);if(mag>1){dx/=mag;dy/=mag;}const speed=(p.energy>0?5:2.5)*dt,nx=clamp(p.x+dx*speed,20,WORLD-20),ny=clamp(p.y+dy*speed,20,WORLD-20);const r=rooms.get(p.room);if(!blockAt(r,nx,ny)){p.x=nx;p.y=ny;}if(mag>.05)p.energy=Math.max(0,p.energy-.035);});
  function action(){const now=Date.now();if(!p||p.dead||now-lastAction<320)return null;lastAction=now;return rooms.get(p.room);}
  socket.on('gather',()=>{const r=action();if(!r)return;const m=r.mobs.find(m=>m.hp>0&&near(m,p,64));if(m){damageMob(r,m,p);return;}const item=r.resources.find(v=>near(v,p,72));if(!item)return;item.hp--;if(item.type==='tree')p.wood+=p.axe?2:1;else if(item.type==='rock')p.stone++;else p.berry++;if(item.hp<=0){item.x=rand(80,WORLD-80);item.y=rand(80,WORLD-80);item.hp=item.type==='berry'?2:4;}});
